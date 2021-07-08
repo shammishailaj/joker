@@ -14,7 +14,7 @@
 
 #include "joker.h"
 
-void run(struct Cmd *r)
+void run(int argc, char *argv[])
 {
     pid_t pid1 = fork();
     if (pid1 > 0) {
@@ -38,21 +38,20 @@ void run(struct Cmd *r)
 #endif
                 close(io[0]);
 
-                char *l[(*r).argc+1];
-                int i;
-                char *s;
-                vec_foreach(&((*r).argv), s, i) {
-                    l[i] = (char *)malloc(strlen(s)+1);
-                    l[i] = strcpy(l[i], s);
+                char *l[argc];
+                int i = 1;
+                for(;i<argc;i++){
+                    l[i-1] = (char *)malloc(strlen(argv[i])+1);
+                    l[i-1] = strcpy(l[i-1], argv[i]);
                 }
-                l[i] = NULL;
+                l[i-1] = NULL;
 
                 dup2(io[1], STDOUT_FILENO);
                 dup2(io[1], STDERR_FILENO);
-                execvp((*r).path, l);
+                execvp(l[0], l);
 
                 i=0;
-                for(;i<(*r).argc;i++){
+                for(;i<argc-1;i++){
                     free(l[i]);
                 }
                 close(io[1]);
@@ -62,26 +61,25 @@ void run(struct Cmd *r)
                 // TODO ignore kill-like signal
                 close(io[1]);
 
-                (*r).pid = pid;
-                sds err = sdsempty();
-                list_add(r, &err);
-                if(strcmp(err, "") != 0){
-                    perror(err);
-                    close(io[0]);
-                    return;
-                }
+                // TODO remove
+                char *s0 = (char *) malloc(24*100 + 7*100);
+                sprintf(s0, "echo %d > /tmp/jokerlastid", pid);
+                system(s0);
+                free(s0);
 
-                char s[16+1];
-                sprintf(s, "/tmp/joker.%d", pid);
+                struct passwd *pw = getpwuid(getuid());
+
+                char *s1 = (char *) malloc(strlen(pw->pw_dir) + 22*100 + 7*100);
+                sprintf(s1, "echo %d > %s/.joker/lastid", pid, pw->pw_dir);
+                system(s1);
+                free(s1);
+
+                char *s = (char *) malloc(strlen(pw->pw_dir) + 9*100 + 7*100+ strlen(argv[1]));
+                sprintf(s, "%s/.joker/%d.%s", pw->pw_dir, pid, basename(argv[1]));
                 FILE *f = fopen(s, "w");
                 if(!f) {
                     perror("can not open log file");
-                    list_stop(r, &err);
-                    if(strcmp(err, "") != 0){
-                        perror(err);
-                        close(io[0]);
-                        return;
-                    }
+                    free(s);
                     close(io[0]);
                     return;
                 }
@@ -100,38 +98,11 @@ void run(struct Cmd *r)
                     }
                     fflush(f);
                 }
-                list_stop(r, &err);
-                if(strcmp(err, "") != 0){
-                    perror(err);
-                    close(io[0]);
-                    fclose(f);
-                    chmod(s, 0666);
-                    return;
-                }
                 close(io[0]);
                 fclose(f);
                 chmod(s, 0666);
+                free(s);
             }
         }
     }
-}
-
-void log_cmd(int pid, sds *e)
-{
-    char s[16+1];
-    sprintf(s, "/tmp/joker.%d", pid);
-    FILE *f = fopen(s, "r");
-    if(!f) {
-        *e = sdscpy(*e, "can not open log");
-        return;
-    }
-    for(;;){
-        char s1[1024];
-        char *s2 = fgets(s1, 1024, f);
-        if(s2 == NULL){
-            break;
-        }
-        printf("%s", s2);
-    }
-    fclose(f);
 }
